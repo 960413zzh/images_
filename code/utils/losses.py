@@ -344,36 +344,34 @@ def symmetric_mse_loss(input1, input2):
     return torch.mean((input1 - input2)**2)
 
 
-class MultiCEFocalLoss(torch.nn.Module):
-    def __init__(self, threshold=0.5,reduction='mean'):
-        super(MultiCEFocalLoss, self).__init__()
+class Focal_Loss(torch.nn.Module):
+    def __init__(self, gamma=2):
+        super(Focal_Loss, self).__init__()
+        self.gamma = gamma
 
-        self.threshold = threshold
-        self.reduction = reduction
 
-    def forward(self, predict, target, alpha, labeled_bs):
-        start = 0
-        pt = F.softmax(predict, dim=1)  # softmmax获取预测概率
-        target = target.data.cpu().numpy()
-        log_p = torch.log(pt)
-        log_p = log_p.data.cpu().numpy()
-        log_p_t = log_p.T
-        a = np.matmul(target, log_p_t)
-        b = np.diagonal(a)
-        c = torch.Tensor(b)
-        c_pt = torch.exp(c)
-        for i in range(len(c_pt)):
-            if c_pt[i] < alpha:
-                m_loss = c[i]
-            else:
-                m_loss = (1-c_pt[i])**2 * c[i]
-            start = start + m_loss
-        loss = (-start)/labeled_bs
-        loss.requires_grad_(True)
-
-        if self.reduction == 'mean':
-            loss = loss.mean()
-        elif self.reduction == 'sum':
-            loss = loss.sum()
-
-        return loss
+    def forward(self, preds, labels, threshold):
+        """
+        preds:softmax输出结果
+        labels:真实值
+        """
+        # preds = F.softmax(preds, dim=1)
+        # y_pred = preds.view((preds.size()[0], preds.size()[1], -1))
+        # target = labels.view(y_pred.size())
+        # ce = -1 * torch.log(y_pred) * target
+        # pt = torch.pow((1 - y_pred), self.gamma)
+        # floss = pt * ce
+        # floss = torch.sum(floss, dim=1)
+        preds = F.softmax(preds, dim=1)
+        y_pred = preds.view((preds.size()[0], preds.size()[1], -1))
+        target = labels.view(y_pred.size())
+        ce = -1 * torch.log(y_pred) * target
+        ce_loss = -ce
+        pt = torch.exp(ce_loss)
+        low_th_weight = torch.ones_like(pt)
+        high_th_weight = (torch.ones_like(pt) - pt)**2
+        weights = torch.where(pt < threshold, low_th_weight, high_th_weight)
+        # pt = torch.sum(pt, dim=1)
+        floss = weights*ce
+        floss = torch.sum(floss, dim=1)
+        return torch.mean(floss)

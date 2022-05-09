@@ -56,7 +56,7 @@ parser.add_argument('--ema_decay', type=float,  default=0.99, help='ema_decay')
 parser.add_argument('--consistency_type', type=str,  default="mse", help='consistency_type')
 parser.add_argument('--consistency', type=float,  default=1, help='consistency')
 parser.add_argument('--consistency_rampup', type=float,  default=30, help='consistency_rampup')
-parser.add_argument('--num_classes', type=int,  default=10, help='num_classes')
+parser.add_argument('--num_classes', type=float,  default=10, help='num_classes')
 args = parser.parse_args()
 
 train_data_path = args.root_path
@@ -79,10 +79,10 @@ def get_current_consistency_weight(epoch):
     # Consistency ramp-up from https://arxiv.org/abs/1610.02242
 
     return args.consistency * ramps.sigmoid_rampup(epoch, args.consistency_rampup)
-def get_MultiCEFocalLoss_weight(epoch):
-    # Consistency ramp-up from https://arxiv.org/abs/1610.02242
+def get_current_threshold(epoch):
 
-    return ((0.5-1 / args.num_classes) / args.epochs * epoch) + 1 / args.num_classes
+
+    return 1/args.num_classes + (1.0-1/args.num_classes)/args.epochs*epoch
 
 def update_ema_variables(model, ema_model, alpha, global_step):
     # Use the true average until the exponential average is more correct
@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
     model = create_model()
     ema_model = create_model(ema=True)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.base_lr, 
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.base_lr,
                                  betas=(0.9, 0.999), weight_decay=5e-4)
 
     if args.resume:
@@ -190,10 +190,10 @@ if __name__ == "__main__":
     #                             shuffle=False, num_workers=8, pin_memory=True, worker_init_fn=worker_init_fn)
     test_dataloader = DataLoader(dataset=test_dataset, batch_size=batch_size,
                                 shuffle=False, num_workers=0, pin_memory=True)#, worker_init_fn=worker_init_fn)
-    
+
     model.train()
 
-    loss_fn = losses.MultiCEFocalLoss()
+    loss_fn = losses.Focal_Loss()
     if args.consistency_type == 'mse':
         consistency_criterion = losses.softmax_mse_loss
     elif args.consistency_type == 'kl':
@@ -214,7 +214,7 @@ if __name__ == "__main__":
         meters_loss_consistency = MetricLogger(delimiter="  ")
         meters_loss_consistency_relation = MetricLogger(delimiter="  ")
         time1 = time.time()
-        iter_max = len(train_dataloader)    
+        iter_max = len(train_dataloader)
         for i, (_,_, (image_batch, ema_image_batch), label_batch) in enumerate(train_dataloader):
             time2 = time.time()
             # print('fetch data cost {}'.format(time2-time1))
@@ -231,15 +231,15 @@ if __name__ == "__main__":
                 ema_activations, ema_output = ema_model(ema_inputs)
 
             ## calculate the loss
-            alpha = get_MultiCEFocalLoss_weight(epoch)
-            loss_classification = loss_fn(outputs[:labeled_bs], label_batch[:labeled_bs], alpha, labeled_bs)
+            threshold = get_current_threshold(epoch)
+            loss_classification = loss_fn(outputs[:labeled_bs], label_batch[:labeled_bs], threshold)
             loss = loss_classification
 
             ## MT loss (have no effect in the beginneing)
             if args.ema_consistency == 1:
                 consistency_weight = get_current_consistency_weight(epoch)
                 consistency_dist = torch.sum(losses.softmax_mse_loss(outputs, ema_output)) / batch_size #/ dataset.N_CLASSES
-                consistency_loss = consistency_weight * consistency_dist  
+                consistency_loss = consistency_weight * consistency_dist
 
                 # consistency_relation_dist = torch.sum(losses.relation_mse_loss_cam(activations, ema_activations, model, label_batch)) / batch_size
                 consistency_relation_dist = torch.sum(losses.relation_mse_loss(activations, ema_activations)) / batch_size
@@ -290,7 +290,7 @@ if __name__ == "__main__":
         timestamp = get_timestamp()
 
         # validate student
-        # 
+        #
         #
         # AUROCs, Accus, Senss, Specs = epochVal_metrics(model, val_dataloader)
         # AUROC_avg = np.array(AUROCs).mean()
@@ -302,10 +302,10 @@ if __name__ == "__main__":
         # logging.info("\nVAL AUROC: {:6f}, VAL Accus: {:6f}, VAL Senss: {:6f}, VAL Specs: {:6f}"
         #             .format(AUROC_avg, Accus_avg, Senss_avg, Specs_avg))
         # logging.info("AUROCs: " + " ".join(["{}:{:.6f}".format(dataset.CLASS_NAMES[i], v) for i,v in enumerate(AUROCs)]))
-        
+
         # test student
         # 
-        AUROCs, Accus, Senss, Specs = epochVal_metrics(model, test_dataloader)  
+        AUROCs, Accus, Senss, Specs = epochVal_metrics(model, test_dataloader)
         AUROC_avg = np.array(AUROCs).mean()
         Accus_avg = np.array(Accus).mean()
         Senss_avg = np.array(Senss).mean()
