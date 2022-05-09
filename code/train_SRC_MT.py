@@ -177,7 +177,7 @@ if __name__ == "__main__":
                                               transforms.ToTensor(),
                                               normalize,
                                           ]))
-    base_dataset = datasets.CIFAR10(../input/cifar-10, train=True, download=False)
+    base_dataset = datasets.CIFAR10('../input/cifar-10', train=True, download=False)
     labeled_idxs = x_u_split(base_dataset.targets)
     unlabeled_idxs = list(range(args.labeled_num, 50000))
     batch_sampler = TwoStreamBatchSampler(labeled_idxs, unlabeled_idxs, batch_size, batch_size-labeled_bs)
